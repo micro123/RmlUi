@@ -13,6 +13,9 @@
 namespace Rml {
 
 // Some data views need to offset the update order for proper behavior.
+// 'data-for' templates and their generated rows are siblings. Reconcile each
+// loop before evaluating bindings on rows that may have been removed.
+static constexpr int SortOffset_DataFor = -1000;
 //  'data-value' may need other attributes applied first, e.g. min/max attributes.
 static constexpr int SortOffset_DataValue = 100;
 //  'data-checked' may need a value attribute already set.
@@ -424,7 +427,7 @@ String DataViewText::BuildText() const
 	return result;
 }
 
-DataViewFor::DataViewFor(Element* element) : DataView(element, 0) {}
+DataViewFor::DataViewFor(Element* element) : DataView(element, SortOffset_DataFor) {}
 
 bool DataViewFor::Initialize(DataModel& model, Element* element, const String& in_expression, const String& /*modifier*/)
 {

@@ -8,6 +8,107 @@
 
 using namespace Rml;
 
+TEST_CASE("data_binding.nested_for_shrink")
+{
+	struct Choice {
+		String id;
+	};
+	struct Row {
+		String id;
+		bool numeric = false;
+		Vector<Choice> choices;
+	};
+
+	Context* context = TestsShell::GetContext(false);
+	REQUIRE(context);
+	Vector<Row> rows;
+	bool visible = true;
+	auto constructor = context->CreateDataModel("nested_for");
+	REQUIRE(constructor);
+	auto choice_type = constructor.RegisterStruct<Choice>();
+	REQUIRE(choice_type);
+	REQUIRE(choice_type.RegisterMember("id", &Choice::id));
+	REQUIRE(constructor.RegisterArray<Vector<Choice>>());
+	auto row_type = constructor.RegisterStruct<Row>();
+	REQUIRE(row_type);
+	REQUIRE(row_type.RegisterMember("id", &Row::id));
+	REQUIRE(row_type.RegisterMember("numeric", &Row::numeric));
+	REQUIRE(row_type.RegisterMember("choices", &Row::choices));
+	REQUIRE(constructor.RegisterArray<Vector<Row>>());
+	REQUIRE(constructor.Bind("rows", &rows));
+	REQUIRE(constructor.Bind("visible", &visible));
+	auto handle = constructor.GetModelHandle();
+	ElementDocument* document = context->LoadDocumentFromMemory(R"(
+<rml><head><style>body { font-family: LatoLatin; }</style></head>
+<body data-model="nested_for"><div data-if="visible">
+	<div data-for="row : rows" data-attr-data-row="row.id">
+		<div data-if="!row.numeric">
+			<button data-for="choice : row.choices" data-attr-data-choice="choice.id">{{choice.id}}</button>
+		</div>
+	</div>
+</div></body></rml>)");
+	REQUIRE(document);
+	document->Show();
+
+	for (int cycle = 0; cycle < 8; ++cycle)
+	{
+		for (int shape = 0; shape < 6; ++shape)
+		{
+			visible = cycle % 2 == 0;
+			rows.clear();
+			const int num_rows = shape == 3 ? 0 : 1 + shape % 3;
+			int num_choices = 0;
+			for (int index = 0; index < num_rows; ++index)
+			{
+				Row row;
+				row.id = "row-" + ToString(index);
+				row.numeric = shape % 2 != 0;
+				if (!row.numeric)
+				{
+					for (int choice = 0; choice < (shape % 3 == 0 ? 14 : 2); ++choice)
+						row.choices.push_back({"choice-" + ToString(choice)});
+				}
+				num_choices += int(row.choices.size());
+				rows.push_back(std::move(row));
+			}
+			handle.DirtyAllVariables();
+			context->Update();
+			TestsShell::SetNumExpectedWarnings(0);
+
+			ElementList elements;
+			document->QuerySelectorAll(elements, "button[data-choice]");
+			CHECK(elements.size() == size_t(num_choices));
+			size_t element_index = 0;
+			for (const Row& row : rows)
+			{
+				for (const Choice& choice : row.choices)
+				{
+					REQUIRE(element_index < elements.size());
+					CHECK(elements[element_index]->GetAttribute<String>("data-choice", "") == choice.id);
+					CHECK(elements[element_index]->GetInnerRML() == choice.id);
+					++element_index;
+				}
+			}
+		}
+	}
+	visible = true;
+	rows = {{"retained", false, {{"before"}}}};
+	handle.DirtyAllVariables();
+	context->Update();
+	Element* retained = document->QuerySelector("button[data-choice]");
+	REQUIRE(retained);
+	CHECK(retained->GetAttribute<String>("data-choice", "") == "before");
+	rows[0].choices[0].id = "after";
+	handle.DirtyVariable("rows");
+	context->Update();
+	CHECK(document->QuerySelector("button[data-choice]") == retained);
+	CHECK(retained->GetAttribute<String>("data-choice", "") == "after");
+	CHECK(retained->GetInnerRML() == "after");
+	TestsShell::SetNumExpectedWarnings(0);
+	document->Close();
+	TestsShell::ShutdownShell();
+}
+
 namespace {
 
 static const String data_binding_rml = R"(
